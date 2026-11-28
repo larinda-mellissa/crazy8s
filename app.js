@@ -1275,9 +1275,10 @@
 
     function showMessages(m, msgs) {
       modal('<h2>Text the players</h2><p class="muted">Opens your phone\'s messaging app with the message ready to send.</p>' + msgs.map(function (x) {
-        var text = D.T.t.name + ': your match is on TABLE ' + m.table + '. Score it here: ' + x.link;
+        var race = (m.stage === 'RR' && D.cfg.teamMode !== 'teams') ? m.race + ' games' : E.raceText(D.cfg, m.race);
+        var text = D.nm(m.p1) + ' vs ' + D.nm(m.p2) + ' - Table ' + m.table + ' - ' + race + '\n' + D.T.t.name + ' · Score it here: ' + x.link;
         return '<div class="card"><b>' + esc(x.name) + '</b><div class="row" style="margin-top:8px">' + (x.phone ? '<a class="btn primary sm" href="' + smsHref(x.phone, text) + '">Text ' + esc(x.phone) + '</a>' : '<span class="dim">No phone</span>') +
-          (x.email ? '<a class="btn sm" href="mailto:' + esc(x.email) + '?subject=' + encodeURIComponent('Table ' + m.table) + '&body=' + encodeURIComponent(text) + '">Email</a>' : '') + '</div></div>';
+          (x.email ? '<a class="btn sm" href="mailto:' + esc(x.email) + '?subject=' + encodeURIComponent(D.nm(m.p1) + ' vs ' + D.nm(m.p2) + ' - Table ' + m.table + ' - ' + race) + '&body=' + encodeURIComponent(text) + '">Email</a>' : '') + '</div></div>';
       }).join('') + '<button class="btn block" data-close>Close</button>');
     }
     function showQR() {

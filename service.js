@@ -492,15 +492,21 @@ var Service = (function () {
 
     function portalLink(e) { return P.siteUrl() + '#/p/' + e.key; }
 
+    /* Email/text sent when a match is put on a table.
+       Subject & first line:  "Player vs Player - Table 3 - Race to 5"  */
+    function matchLine(t, m, ps, es) {
+      var cfg = cfgOf(t), a = es[m.p1], b = es[m.p2];
+      var race = (m.stage === 'RR' && cfg.teamMode !== 'teams') ? m.race + ' games' : E.raceText(cfg, m.race);
+      return (a ? entryName(a, ps) : '?') + ' vs ' + (b ? entryName(b, ps) : '?') + ' - Table ' + m.table + ' - ' + race;
+    }
     function notifyMatch(t, m) {
-      var es = {}, ps = playersMap(), cfg = cfgOf(t); tEntries(t.id).forEach(function (e) { es[e.id] = e; });
-      var msgs = [];
-      [[m.p1, m.p2], [m.p2, m.p1]].forEach(function (pair) {
-        var e = es[pair[0]], o = es[pair[1]]; if (!e) return;
-        var desc = (m.stage === 'RR' && cfg.teamMode !== 'teams') ? m.race + '-game round robin match' : E.raceText(cfg, m.race);
-        var text = t.name + ': your match vs ' + (o ? entryName(o, ps) : '?') + ' is on TABLE ' + m.table + ' (' + desc + '). Score it here: ' + portalLink(e);
+      var es = {}, ps = playersMap(); tEntries(t.id).forEach(function (e) { es[e.id] = e; });
+      var line = matchLine(t, m, ps, es), msgs = [];
+      [m.p1, m.p2].forEach(function (id) {
+        var e = es[id]; if (!e) return;
+        var text = line + '\n\n' + t.name + (m.label ? ' · ' + m.label : '') + '\nPlease head to Table ' + m.table + ' now.\n\nScore your match here: ' + portalLink(e);
         membersOf(e).forEach(function (x) { var p = ps[x.pid];
-          msgs.push({ name: playerName(p), email: p && p.email, phone: p && p.phone, subject: 'Table ' + m.table + ' — your match is up', text: text }); });
+          msgs.push({ name: playerName(p), email: p && p.email, phone: p && p.phone, subject: line, text: text }); });
       });
       try { return P.notify(msgs); } catch (x) { return []; }
     }
