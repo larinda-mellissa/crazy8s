@@ -39,14 +39,29 @@ var Engine = (function () {
       seeding: 'random', tables: ['1', '2', '3', '4', '5', '6', '7', '8'],
       autoCall: true, notifyOnCall: true,
       entryFee: 0, addedMoney: 0, housePct: 0, payoutPct: [50, 30, 20], roundTo: 5,
-      notes: ''
+      notes: '',
+      // team events
+      teamMode: 'singles',      // 'singles' | 'doubles' (scotch doubles, pairs) | 'teams' (team vs team = set of singles)
+      jackJill: false,          // doubles: every pair must be one Jack + one Jill
+      teamSize: 4,              // teams: minimum players on a roster (can include subs)
+      playersPerSide: 4,        // teams: players per side
+      teamRounds: 4,            // teams: rounds per match (3v3=3/3, 4v4=4/4, 5v4=5 players 4 rounds, 5v5=5/5)
+      teamWin: 'wins',          // teams: 'wins' = race to X team game-wins (rounds repeat until reached), 'points' = all rounds, most points
+      raceRR: 9,                // teams: team race (wins) during round robin
+      feePer: 'team',           // 'team' | 'player'
+      teamStats: 'finishes'     // 'all' | 'finishes' | 'none' — how team results count in personal stats
     };
     cfg = cfg || {};
     for (var k in cfg) if (cfg[k] !== undefined && cfg[k] !== null) c[k] = cfg[k];
     if (c.gameType === '9') c.raceType = 'wins';     // 9 ball is purely games won
+    if (c.teamMode === 'doubles') c.teamSize = 2; else c.jackJill = false;
+    if (c.gameType === '9') c.teamWin = 'wins';
+    if (c.teamMode === 'teams' && Number(c.playersPerSide) > Number(c.teamSize)) c.teamSize = Number(c.playersPerSide);
+    if (!(Number(c.teamRounds) > 0) || Number(c.teamRounds) > Number(c.playersPerSide)) c.teamRounds = Number(c.playersPerSide) || 4;
+    if (c.jackJill === 'true') c.jackJill = true;
     if (typeof c.tables === 'string') c.tables = c.tables.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
     if (typeof c.payoutPct === 'string') c.payoutPct = c.payoutPct.split(/[ ,\/]+/).map(Number).filter(function (x) { return x > 0; });
-    ['raceA', 'raceB', 'raceFinal', 'rrGames', 'groupSize', 'groups', 'advance', 'wildcards', 'entryFee', 'addedMoney', 'housePct', 'roundTo']
+    ['teamSize', 'playersPerSide', 'teamRounds', 'raceRR', 'raceA', 'raceB', 'raceFinal', 'rrGames', 'groupSize', 'groups', 'advance', 'wildcards', 'entryFee', 'addedMoney', 'housePct', 'roundTo']
       .forEach(function (k) { if (c[k] !== '' && c[k] !== undefined) c[k] = Number(c[k]); });
     if (c.raceBFinal !== '' && c.raceBFinal !== undefined) c.raceBFinal = Number(c.raceBFinal);
     return c;
@@ -118,7 +133,7 @@ var Engine = (function () {
   function rackPts(cfg, rack, side) {
     var won = rack.w === side;
     if (cfg.raceType === 'points' && cfg.gameType !== '9') {
-      if (won) return rack.e ? 13 : 10;
+      if (won) return 10;                 // ERO is worth 13 only in singles round robin games (rrSidePts)
       return Math.max(0, Math.min(7, Number(rack.n) || 0));
     }
     return won ? 1 : 0;
@@ -128,6 +143,7 @@ var Engine = (function () {
 
   /* Totals + completion for any match */
   function computeMatch(m, cfg) {
+    if (cfg.teamMode === 'teams') return teamCompute(m, cfg);
     var games = m.games || [], r = { s1: 0, s2: 0, w1: 0, w2: 0, e1: 0, e2: 0, played: games.length, complete: false, winnerSide: 0, error: '' };
     if (m.stage === 'RR') {
       games.forEach(function (g, i) {
@@ -139,7 +155,12 @@ var Engine = (function () {
       if (r.complete) r.winnerSide = r.s1 > r.s2 ? 1 : (r.s2 > r.s1 ? 2 : 0);
       return r;
     }
-    var race = matchRace(m);
+    return koCompute(games, matchRace(m), cfg);
+  }
+
+  /* one race: racks [{w,e,n}] */
+  function koCompute(games, race, cfg) {
+    var r = { s1: 0, s2: 0, w1: 0, w2: 0, e1: 0, e2: 0, played: games.length, complete: false, winnerSide: 0, error: '' };
     for (var i = 0; i < games.length; i++) {
       var g = games[i];
       if (r.complete) { r.error = 'Rack ' + (i + 1) + ' was entered after the match ended'; break; }
@@ -151,6 +172,87 @@ var Engine = (function () {
         if (r.s1 >= race && r.s2 >= race) r.winnerSide = g.w;      // both crossed: rack winner takes it
         else r.winnerSide = r.s1 >= race ? 1 : 2;
       }
+    }
+    return r;
+  }
+
+  /* ===== TEAM MATCH: player vs player, one game each, in rounds =====
+     m.lineup = { h: [home pids, board order], a: [away pids], hcp1, hcp2 }
+     m.games  = sparse array; slot k = round floor(k/P), board k%P : null or { w:1|2, n: loser balls, t1: tag home player, t2: tag away player }
+       tags: '' | 'ERO' | 'BRO' | '1ST'
+     Round r, board b: home h[b] vs away a[(b + r) % P].  Home breaks rounds 1,3,5 · away breaks 2,4.
+     teamWin 'points' (match card): game = 10 to the winner, loser = balls made.
+       Round Total = points + handicap (per round). Round won by higher Round Total, tie -> more game wins.
+       +1 overall to the team with more total points (tie -> more game wins). Match Total = rounds won + overall.
+       Tied Match Total -> the last round is replayed; the replay decides it.
+     teamWin 'wins': team score = handicap + games won; first to the race (m.race); rounds keep rotating until reached. */
+  function teamSide(cfg) { return Number(cfg.playersPerSide) || 4; }
+  function teamRoundsOf(cfg) { var P = teamSide(cfg), R = Number(cfg.teamRounds) || P; return Math.min(R, P); }
+  function teamPair(cfg, lineup, k) {
+    var P = teamSide(cfg), R = teamRoundsOf(cfg), r = Math.floor(k / P), b = k % P;
+    var rot = (cfg.teamWin === 'points' && r >= R) ? R - 1 : r % P;
+    lineup = lineup || {};
+    return { round: r, board: b, home: (lineup.h || [])[b] || '', away: (lineup.a || [])[(b + rot) % P] || '', homeBreaks: r % 2 === 0, replay: cfg.teamWin === 'points' && r >= R };
+  }
+  function gamePts(g, side) { if (!g || !g.w) return 0; return g.w === side ? 10 : Math.max(0, Math.min(7, Number(g.n) || 0)); }
+  function teamCompute(m, cfg) {
+    var P = teamSide(cfg), R = teamRoundsOf(cfg), L = m.lineup || {}, g = m.games || [], pts = cfg.teamWin === 'points' && cfg.gameType !== '9';
+    var h1 = Number(L.hcp1) || 0, h2 = Number(L.hcp2) || 0;
+    var r = { s1: 0, s2: 0, hcp1: h1, hcp2: h2, w1: 0, w2: 0, e1: 0, e2: 0, played: 0, complete: false, winnerSide: 0, error: '',
+      N: P, R: R, points: pts, ready: !!(L.h && L.a && L.h.length === P && L.a.length === P), rounds: [], showRounds: R,
+      tags1: { ERO: 0, BRO: 0, '1ST': 0 }, tags2: { ERO: 0, BRO: 0, '1ST': 0 } };
+    var done = function (k) { return g[k] && (g[k].w === 1 || g[k].w === 2); };
+    var lastRound = 0;
+    g.forEach(function (x, k) {
+      if (!done(k)) return;
+      r.played++; lastRound = Math.max(lastRound, Math.floor(k / P) + 1);
+      if (x.w === 1) r.w1++; else r.w2++;
+      if (r.tags1[x.t1] !== undefined) r.tags1[x.t1]++;
+      if (r.tags2[x.t2] !== undefined) r.tags2[x.t2]++;
+    });
+    r.e1 = r.tags1.ERO; r.e2 = r.tags2.ERO;
+    var rounds = Math.max(lastRound, P >= 1 ? 1 : 0);
+    for (var ri = 0; ri < Math.max(rounds, pts ? R : 0); ri++) {
+      var o = { sub1: 0, sub2: 0, gw1: 0, gw2: 0, full: true, win: 0, replay: pts && ri >= R };
+      for (var b = 0; b < P; b++) {
+        var k = ri * P + b, x = g[k];
+        if (!done(k)) { o.full = false; continue; }
+        o.sub1 += gamePts(x, 1); o.sub2 += gamePts(x, 2);
+        if (x.w === 1) o.gw1++; else o.gw2++;
+      }
+      o.h1 = h1; o.h2 = h2; o.tot1 = o.sub1 + h1; o.tot2 = o.sub2 + h2;
+      if (o.full) o.win = o.tot1 > o.tot2 ? 1 : o.tot2 > o.tot1 ? 2 : (o.gw1 > o.gw2 ? 1 : o.gw2 > o.gw1 ? 2 : 0);
+      r.rounds.push(o);
+    }
+    if (pts) {
+      var reg = r.rounds.slice(0, R), allFull = reg.length === R && reg.every(function (o) { return o.full; });
+      r.grand1 = 0; r.grand2 = 0; r.rw1 = 0; r.rw2 = 0; r.gw1 = 0; r.gw2 = 0;
+      reg.forEach(function (o) { r.grand1 += o.tot1; r.grand2 += o.tot2; r.gw1 += o.gw1; r.gw2 += o.gw2; if (o.win === 1) r.rw1++; if (o.win === 2) r.rw2++; });
+      r.overall = 0;
+      if (allFull) r.overall = r.grand1 > r.grand2 ? 1 : r.grand2 > r.grand1 ? 2 : (r.gw1 > r.gw2 ? 1 : r.gw2 > r.gw1 ? 2 : 0);
+      r.mp1 = r.rw1 + (r.overall === 1 ? 1 : 0); r.mp2 = r.rw2 + (r.overall === 2 ? 1 : 0);   // match Total (decides the winner)
+      // headline score = total points so far (round totals incl. handicap for rounds that have started)
+      r.s1 = 0; r.s2 = 0;
+      reg.forEach(function (o, ri) {
+        var any = false; for (var bq = 0; bq < P; bq++) if (done(ri * P + bq)) any = true;
+        if (any) { r.s1 += o.tot1; r.s2 += o.tot2; }
+      });
+      if (r.ready && allFull) {
+        if (r.mp1 !== r.mp2) { r.complete = true; r.winnerSide = r.mp1 > r.mp2 ? 1 : 2; }
+        else {
+          for (var q = R; q < r.rounds.length; q++) { var rp = r.rounds[q]; if (rp.full && rp.win) { r.complete = true; r.winnerSide = rp.win; break; } }
+          r.tied = !r.complete;
+        }
+      }
+      var needReplay = r.ready && allFull && !r.complete;
+      r.showRounds = Math.max(R, lastRound + (needReplay && (lastRound <= R || (r.rounds[lastRound - 1] && r.rounds[lastRound - 1].full)) ? 1 : 0));
+      if (needReplay && lastRound < R) r.showRounds = R + 1;
+    } else {
+      r.s1 = h1 + r.w1; r.s2 = h2 + r.w2;
+      var race = Number(m.race) || 0;
+      if (r.ready && race && (r.s1 >= race || r.s2 >= race)) { r.complete = true; r.winnerSide = r.s1 >= r.s2 ? 1 : 2; }
+      var full = 0; while (full < 60) { var all = true; for (var bb = 0; bb < P; bb++) if (!done(full * P + bb)) { all = false; break; } if (!all) break; full++; }
+      r.showRounds = r.complete ? Math.max(lastRound, 1) : Math.max(P, full + 1, lastRound);
     }
     return r;
   }
@@ -388,7 +490,12 @@ var Engine = (function () {
   /* Prize fund + payouts. entries need {id, paid, amount, place, payoutOverride} */
   function payouts(cfg, entries) {
     var collected = 0, paidCount = 0;
-    entries.forEach(function (e) { if (truthy(e.paid)) { paidCount++; collected += (e.amount !== '' && e.amount != null) ? Number(e.amount) : Number(cfg.entryFee || 0); } });
+    entries.forEach(function (e) {
+      if (!truthy(e.paid)) return;
+      paidCount++;
+      var fee = Number(cfg.entryFee || 0) * (cfg.feePer === 'player' ? (Number(e.size) || 1) : 1);
+      collected += (e.amount !== '' && e.amount != null) ? Number(e.amount) : fee;
+    });
     var house = collected * (Number(cfg.housePct) || 0) / 100;
     var fund = collected - house + (Number(cfg.addedMoney) || 0);
     var pct = (cfg.payoutPct || []).map(Number), out = {}, roundTo = Number(cfg.roundTo) || 1;
@@ -411,6 +518,11 @@ var Engine = (function () {
   function truthy(v) { return v === true || v === 'TRUE' || v === 'true' || v === 1 || v === '1' || v === 'yes'; }
 
   function raceText(cfg, race) {
+    if (cfg.teamMode === 'teams') {
+      var N = teamSide(cfg);
+      if (cfg.teamWin === 'points' && cfg.gameType !== '9') return N + 'v' + teamRoundsOf(cfg) + ' match card · rounds + overall points';
+      return N + 'v' + N + ' · race to ' + race + ' wins';
+    }
     if (cfg.raceType === 'points' && cfg.gameType !== '9') return 'Race to ' + race + ' pts';
     return 'Race to ' + race;
   }
@@ -418,7 +530,7 @@ var Engine = (function () {
   return {
     defaults: defaults, rrPlan: rrPlan, dealGroups: dealGroups, roundRobinPairs: roundRobinPairs, shuffle: shuffle,
     seedOrder: seedOrder, nextPow2: nextPow2, groupLetter: groupLetter,
-    rrSidePts: rrSidePts, validRRGame: validRRGame, rackPts: rackPts, computeMatch: computeMatch,
+    rrSidePts: rrSidePts, validRRGame: validRRGame, rackPts: rackPts, computeMatch: computeMatch, koCompute: koCompute, teamCompute: teamCompute, teamPair: teamPair, teamSide: teamSide, teamRoundsOf: teamRoundsOf, gamePts: gamePts,
     standings: standings, buildBracket: buildBracket, resolve: resolve, refreshRR: refreshRR, roundName: roundName,
     champion: champion, placements: placements, rankPoints: rankPoints, payouts: payouts, truthy: truthy, raceText: raceText
   };

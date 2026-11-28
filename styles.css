@@ -1,4 +1,4 @@
-:root{
+:root{ --yellow:#f6e21b;
   --bg:#0a0a0b; --bg2:#111113; --card:#161618; --card2:#1d1d20; --line:#2b2b30;
   --red:#8e1118; --red2:#b3151e; --red3:#e0323c; --redglow:rgba(179,21,30,.35);
   --text:#f3f1f1; --muted:#9b9899; --dim:#6d6a6b; --gold:#d9b25f; --green:#3bb273;
@@ -120,3 +120,31 @@ fieldset{border:1px solid var(--line);border-radius:10px;padding:12px 14px 4px;m
   .side .big{font-size:52px} th,td{padding:7px 6px;font-size:13px} .hide-sm{display:none}
 }
 @media print{.top,.nav,.btn,.demo-bar{display:none!important} body{background:#fff;color:#000}}
+
+/* Crazy 8s branding */
+.logo{height:46px;width:auto;border-radius:7px;display:block;box-shadow:0 0 0 1px rgba(255,255,255,.08)}
+.brand-text small{color:var(--yellow)}
+.hero{display:flex;align-items:center;gap:18px;margin-bottom:8px}
+.hero img{width:150px;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.6)}
+@media (max-width:640px){.logo{height:38px}.hero img{width:96px}.hero{gap:12px}}
+.brand-text b,.hero h1{text-transform:none}
+/* team match card */
+.mc{font-size:13px}
+.mc th{padding:6px 4px;text-align:center;font-size:11px}
+.mc th.pn,.mc td.pn{text-align:left;min-width:110px;max-width:150px;padding:6px 8px}
+.mc td.pn{font-weight:600;font-size:13px;line-height:1.2}
+.mc .pnum{display:inline-block;min-width:16px;color:var(--yellow);font-weight:700;margin-right:4px}
+.mc td.cell{text-align:center;padding:5px 2px;min-width:38px;position:relative;border-left:1px solid #222}
+.mc td.cell[data-cell]{cursor:pointer} .mc td.cell[data-cell]:hover{background:#2a1013}
+.mc td.cell b{display:block;font-size:15px;min-height:18px}
+.mc td.cell.won b{color:var(--gold)} .mc td.cell.lost b{color:#cfcaca} .mc td.cell.na b{color:#444}
+.mc .op{display:block;font-size:10px;color:var(--yellow);opacity:.8}
+.mc .tg{display:block;font-size:9px;font-weight:800;color:#fff;background:var(--red);border-radius:4px;margin:1px 3px 0}
+.mc td.tot{background:#1a1a1d}
+.mc td.lbl{font-weight:600;color:var(--muted);text-align:right;font-size:12px}
+.mc tr.st td.cell{background:#231d1c} .mc tr.hc td.cell{background:#10344a} .mc tr.rt td.cell{background:#173d27}
+.mc tr.wr td.cell{background:#0f3a40} .mc tr.tt td.cell{background:#1d4d2e}
+.mc tr.st td,.mc tr.hc td,.mc tr.rt td,.mc tr.wr td,.mc tr.tt td{border-bottom:1px solid #0a0a0b}
+.mc-wrap{margin-bottom:12px}
+
+.ver{text-align:center;font-size:11px;color:var(--dim);padding:0 0 24px}
